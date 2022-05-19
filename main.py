@@ -497,7 +497,6 @@ def train(model, traindata, devdata, optimizer):
 
         print(f"Epoch {epoch} / {args.epochs}:")
         model.train()
-        print(len(traindata.loader))
         for i, (words, *feats, trees, charts) in enumerate(traindata.loader):
             # mask out the lower left triangle     
             word_mask = words.ne(args.pad_index)[:, 1:]
