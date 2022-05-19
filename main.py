@@ -63,8 +63,8 @@ class SpanMetric(Metric):
         return self
 
     def __repr__(self):
-        s = f"UCM: {self.ucm:6.2%} LCM: {self.lcm:6.2%} "
-        s += f"UP: {self.up:6.2%} UR: {self.ur:6.2%} UF: {self.uf:6.2%} "
+        s = f"UCM: {self.ucm:6.2%} LCM: {self.lcm:6.2%} \n"
+        s += f"UP: {self.up:6.2%} UR: {self.ur:6.2%} UF: {self.uf:6.2%} \n"
         s += f"LP: {self.lp:6.2%} LR: {self.lr:6.2%} LF: {self.lf:6.2%}"
 
         return s
