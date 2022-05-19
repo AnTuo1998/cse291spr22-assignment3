@@ -10,7 +10,7 @@ from data import Dataset, Tree, Field, RawField, ChartField
 import argparse
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 from node import Node, draw_tree
-
+from util import log_sum_exp_batch as log_sum_exp
 
 class Metric(object):
   
@@ -147,6 +147,7 @@ def stripe(x, n, w, offset=(0, 0), dim=1):
                         stride=stride,
                         storage_offset=(offset[0]*seq_len+offset[1])*numel)
 
+
 def cky(scores, mask):
     lens = mask[:, 0].sum(-1)
     batch_size, seq_len, seq_len, n_labels = scores.shape
@@ -161,7 +162,8 @@ def cky(scores, mask):
         offset = d - 1
         n = seq_len - offset
         starts = p_s.new_tensor(range(n)).unsqueeze(0)
-        # [batch_size, n]
+        # [batch_size, n] 
+        # scores.diagonal(offset) [n_labels, batch_size, n]
         s_label, p_label = scores.diagonal(offset).max(0)
         p_l.diagonal(offset).copy_(p_label)
 
@@ -238,7 +240,9 @@ class CRFConstituency(nn.Module):
         mask = mask.permute(1, 2, 0)
 
         # working in the log space, initial s with log(0) == -inf
+        # [seq_len, seq_len, batch_size]
         s = torch.full_like(scores[:, :, 0], float('-inf'))
+        
 
         for d in range(2, seq_len + 1): # d = 2, 3, ..., seq_len
             # define the offset variable for convenience
@@ -250,14 +254,25 @@ class CRFConstituency(nn.Module):
             # [batch_size, n]
             diag_mask = mask.diagonal(offset)
 
-            ##### TODO   
-            # if d == 2:
-            #    DO something 
-            # else:
-            #    DO something
+            # scores.diagonal(offset) [n_labels, batch_size, n]
+            # s_label [batch_size, n]
+            s_label = log_sum_exp(scores.diagonal(offset))
 
+            if d == 2:
+                # s.diagonal(offset) [n, batch_size]
+                s.diagonal(offset).copy_(s_label)
+                continue
+            # TODO
+            # [n, offset, batch_size]
+            s_span = stripe(s, n, offset-1, (0, 1)) + \
+                stripe(s, n, offset-1, (1, offset), 0)
+            # [offset, batch_size, n]
+            s_span = s_span.permute(1, 2, 0)
+            # [batch_size, n]
+            s_span = log_sum_exp(s_span)
+            # s.diagonal(offset) [batch_size, n]
+            s.diagonal(offset).copy_(s_span + s_label)
         return s
-
 
 class Biaffine(nn.Module):
     r"""
@@ -475,14 +490,14 @@ class Model(nn.Module):
 
 def train(model, traindata, devdata, optimizer):
     elapsed = timedelta()
-    best_e, best_metric = 1, Metric()
+    best_e, best_metric = 1, SpanMetric()
 
     for epoch in range(1, args.epochs + 1):
         start = datetime.now()
 
         print(f"Epoch {epoch} / {args.epochs}:")
         model.train()
-
+        print(len(traindata.loader))
         for i, (words, *feats, trees, charts) in enumerate(traindata.loader):
             # mask out the lower left triangle     
             word_mask = words.ne(args.pad_index)[:, 1:]
