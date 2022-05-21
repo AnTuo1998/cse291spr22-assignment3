@@ -421,8 +421,10 @@ class Model(nn.Module):
 
         args.n_hidden = n_lstm_hidden * 2
 
-        self.mlp_l = MLP(n_in=args.n_hidden, n_out=n_label_mlp, dropout=mlp_dropout)
-        self.mlp_r = MLP(n_in=args.n_hidden, n_out=n_label_mlp, dropout=mlp_dropout)
+        # self.mlp_l = MLP(n_in=args.n_hidden, n_out=n_label_mlp, dropout=mlp_dropout)
+        # self.mlp_r = MLP(n_in=args.n_hidden, n_out=n_label_mlp, dropout=mlp_dropout)
+        self.n_label_mlp = n_label_mlp
+        self.mlp = MLP(n_in=args.n_hidden, n_out=n_label_mlp * 2, dropout=mlp_dropout)
 
 
         self.feat_biaffine = Biaffine(n_in=n_label_mlp, n_out=n_labels, bias_x=True, bias_y=True)
@@ -464,9 +466,14 @@ class Model(nn.Module):
         x = torch.cat((x_f[:, :-1], x_b[:, 1:]), -1)
 
         # apply MLPs to the BiLSTM output states
-        feat_r_l = self.mlp_l(x)
-        feat_r_r = self.mlp_r(x)
-
+        # feat_r_l = self.mlp_l(x)
+        # feat_r_r = self.mlp_r(x)
+        feat = self.mlp(x)
+        feat_r_l = feat[:, :, :self.n_label_mlp]
+        feat_r_r = feat[:, :, self.n_label_mlp:]
+        # print(feat.shape)
+        # print(feat_r_l.shape)
+        
         # [batch_size, seq_len, seq_len, n_labels]
         feat_r = self.feat_biaffine(feat_r_l, feat_r_r).permute(0, 2, 3, 1)
 
@@ -691,5 +698,7 @@ if __name__ == "__main__":
         model.load_state_dict(torch.load(args.load))
         print("load the model successfully")
     
+    loss, dev_metric = evaluate(model, devdata.loader)
+    print(loss, dev_metric)
     # evaluate(model, testdata.loader)
-    p = predict(model, testdata.loader)
+    # predict(model, testdata.loader)

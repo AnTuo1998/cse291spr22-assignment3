@@ -1,1 +1,1 @@
-python3 main.py --batch-size 128 --data data/PTB_first_2000
+python3 atten.py --batch-size 128 --data data/PTB_first_2000
