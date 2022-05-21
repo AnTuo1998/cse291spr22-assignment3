@@ -2,6 +2,7 @@ import torch
 from collections import defaultdict, Counter, namedtuple
 from collections.abc import Iterable
 import os
+from pytorch_pretrained_bert.tokenization import BertTokenizer
 
 import nltk
 
@@ -226,12 +227,14 @@ class Dataset(torch.utils.data.Dataset):
     def build(self, batch_size, n_buckets=1, shuffle=False, distributed=False):
         # numericalize all fields
         self.fields = self.transform(self.sentences)
+        # print(self.sentences[0].values[:2])
         # NOTE: the final bucket count is roughly equal to n_buckets
-        self.buckets = dict(zip(*kmeans([len(s.transformed[self.fields[0].name]) for s in self], n_buckets)))
+        self.buckets = dict(zip(*kmeans([len(s.transformed[self.fields[1].name]) for s in self], n_buckets)))
         self.loader = DataLoader(dataset=self,
                                  batch_sampler=Sampler(self.buckets, batch_size, shuffle, distributed),
                                  collate_fn=self.collate_fn)
 
+        
 
 class DataLoader(torch.utils.data.DataLoader):
     r"""
@@ -639,7 +642,11 @@ class Transform(object):
     def __call__(self, sentences):
         # numericalize the specified field of each sentence and set the value as sentence attribute
         for f in self.flattened_fields:
-            values = f.transform([getattr(i, f.name) for i in sentences])
+            seq = [getattr(i, f.name) for i in sentences]
+            if f == InputFeatures or isinstance(f, Field):
+                values = seq
+            else:
+                values = f.transform(seq)
             for s, v in zip(sentences, values):
                 s.transformed[f.name] = v
         return self.flattened_fields
@@ -1030,17 +1037,93 @@ class TreeSentence(Sentence):
         self.values[-2].pretty_print()
 
 
+class InputFeatures:
+    """A single set of features of data.
+    result of convert_examples_to_features(InputExample)
+    """
+    name = "words"
+    def __init__(self, input_ids, input_mask, segment_ids,  predict_mask):
+        
+        self.input_ids = input_ids
+        self.input_mask = input_mask
+        self.segment_ids = segment_ids
+        self.predict_mask = predict_mask
+
+def bertify(dataset:Dataset, tokenizer, WORD, TAG):
+    for sen in dataset.sentences:
+        words, tags, tree, chart = sen.values
+        # print(words, tags)
+        sen.values = [*example2feature(words, tags, tokenizer, TAG.vocab), tree, chart]
+        # words, tags, tree, chart = sen.values
+        # print(words.input_ids, tags)
+        # raise NotImplementedError
+
+
+def example2feature(words, labels, tokenizer, label_map):
+
+    add_label = 'X'
+    # tokenize_count = []
+    tokens = ['[CLS]']
+    predict_mask = [0]
+    label_ids = [label_map['[CLS]']]
+    for i, w in enumerate(words):
+        # use bertTokenizer to split words
+        # 1996-08-22 => 1996 - 08 - 22
+        # sheepmeat => sheep ##me ##at
+        sub_words = tokenizer.tokenize(w)
+        if not sub_words:
+            sub_words = ['[UNK]']
+        # tokenize_count.append(len(sub_words))
+        tokens.extend(sub_words)
+        for j in range(len(sub_words)):
+            if j == 0:
+                predict_mask.append(1)
+                label_ids.append(label_map[labels[i]])
+            else:
+                # '##xxx' -> 'X' (see bert paper)
+                predict_mask.append(0)
+                label_ids.append(label_map[add_label])
+
+    # truncate
+    # if len(tokens) > max_seq_length - 1:
+    #     print('Example No.{} is too long, length is {}, truncated to {}!'.format(example.guid, len(tokens), max_seq_length))
+    #     tokens = tokens[0:(max_seq_length - 1)]
+    #     predict_mask = predict_mask[0:(max_seq_length - 1)]
+    #     label_ids = label_ids[0:(max_seq_length - 1)]
+    tokens.append('[SEP]')
+    predict_mask.append(0)
+    label_ids.append(label_map['[SEP]'])
+
+    input_ids = tokenizer.convert_tokens_to_ids(tokens)
+    segment_ids = [0] * len(input_ids)
+    input_mask = [1] * len(input_ids)
+
+    feat=InputFeatures(
+                # guid=example.guid,
+                # tokens=tokens,
+                input_ids=input_ids,
+                input_mask=input_mask,
+                segment_ids=segment_ids,
+                predict_mask=predict_mask)
+
+    return feat, label_ids
+
+
 if __name__ == "__main__":
     WORD = Field('words', pad='<pad>', unk='<unk>', bos='<bos>', eos='<eos>', lower=True)
     TAG = Field('tags', bos="<bos>", eos='<eos>')
     TREE = RawField('trees')
     CHART = ChartField('charts')
     transform = Tree(WORD=(WORD), POS=TAG, TREE=TREE, CHART=CHART)
-    train = Dataset(transform, "./data/ptb/train.pid")
+    train = Dataset(transform, "data/PTB_LE10/train.pid")
     WORD.build(train, 2, None)
     CHART.build(train)
     TAG.build(train)
-
-
-    import pdb; pdb.set_trace()
+    bert_model_scale = 'bert-base-cased'
+    tokenizer = BertTokenizer.from_pretrained(bert_model_scale, do_lower_case=False)
+    bertify(train, tokenizer, WORD, TAG)
+    transform.WORD = InputFeatures
+    train.build(128, 32, True)
+    print(train.sentences[0].values)
+    # import pdb; pdb.set_trace()
 
