@@ -143,16 +143,16 @@ def draw_tree(r: Node, res_path=None):
         for child in curr_node.children:
             bfs_list.append((curr_node_num, child))
     if res_path is not None:
-        dot.render(res_path, format="png") 
+        dot.render(res_path, format="pdf") 
     return dot
 
 
 if __name__ == "__main__":
-    with open("./data/ptb_LE10/train.pid") as f:
-        for l in f:
+    with open("./data/PTB_first_2000/test.pid") as f:
+        for i, l in enumerate(f):
             l = l.strip("\n")
             t = from_string(l)
-            if t.sen_len() <= 10:
-                print(l )
-                draw_tree(t, "viz.png")
-                break
+            if t.sen_len() <= 10 and t.sen_len() >= 5:
+                # print(t.sen_len())
+                draw_tree(t, res_path=f"treefig/prediction_test{i}_true")
+                # break

@@ -1,0 +1,1 @@
+python3 main.py --batch-size 128 --data data/PTB_first_2000

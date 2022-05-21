@@ -2,3 +2,7 @@ __pycache__
 .vscode
 *.pdf
 *.png
+out*
+treefig*
+*.pt
+test_plot*

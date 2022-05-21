@@ -10,6 +10,7 @@ from data import Dataset, Tree, Field, RawField, ChartField
 import argparse
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 from node import Node, draw_tree
+from tqdm import tqdm
 from util import log_sum_exp_batch as log_sum_exp
 
 class Metric(object):
@@ -518,10 +519,12 @@ def train(model, traindata, devdata, optimizer):
         t = datetime.now() - start
         if dev_metric > best_metric:
             best_e, best_metric = epoch, dev_metric
+            torch.save(model.state_dict(), "model.pt")
+            print(f"Epoch {best_e} saved")
         elapsed += t
 
-        print(f"Epoch {best_e} saved")
-        print(f"{'dev:':5} {best_metric}")
+        # print(f"Epoch {best_e} saved")
+        # print(f"{'dev:':5} {best_metric}")
         print(f"{elapsed}s elapsed, {elapsed / epoch}s/epoch")
 
 def convert_to_viz_tree(tree, sen):
@@ -548,13 +551,13 @@ def convert_to_viz_tree(tree, sen):
 
 
 @torch.no_grad()
-def evaluate(model, loader):
+def evaluate(model, loader, draw_pred=False):
 
     model.eval()
 
     total_loss, metric = 0, SpanMetric()
 
-    for words, *feats, trees, charts in loader:
+    for i, (words, *feats, trees, charts) in enumerate(loader):
         # mask out the lower left triangle     
         word_mask = words.ne(args.pad_index)[:, 1:]
         mask = word_mask if len(words.shape) < 3 else word_mask.any(-1)
@@ -569,13 +572,13 @@ def evaluate(model, loader):
                     for tree, chart in zip(trees, chart_preds)]
         total_loss += loss.item()
 
-        if args.draw_pred: ### draw trees here
+        if draw_pred: ### draw trees here
             filter_delete = lambda x: [it for it in x if it not in args.delete]
             trees_fact = [Tree.factorize(tree, args.delete, args.equal) for tree in preds]
             leaves = [filter_delete(tree.leaves()) for tree in trees]
             t = convert_to_viz_tree(tree=trees_fact[0], sen=leaves[0])
 
-            draw_tree(t, res_path="./prediction")
+            draw_tree(t, res_path=f"./treefig/prediction_dev{i}")
 
         metric([Tree.factorize(tree, args.delete, args.equal) for tree in preds],
                 [Tree.factorize(tree, args.delete, args.equal) for tree in trees])
@@ -588,7 +591,7 @@ def predict(model, loader):
     model.eval()
 
     preds = {'trees': [], 'probs': []}
-    for words, *feats, trees, charts in loader:
+    for i, (words, *feats, trees, charts) in enumerate(tqdm(loader)):
         word_mask = words.ne(args.pad_index)[:, 1:]
         mask = word_mask if len(words.shape) < 3 else word_mask.any(-1)
         mask = (mask.unsqueeze(1) & mask.unsqueeze(2)).triu_(1)
@@ -598,14 +601,13 @@ def predict(model, loader):
         chart_preds = model.decode(s_feat, mask)
         preds['trees'].extend([Tree.build(tree, [(i, j, CHART.vocab[label]) for i, j, label in chart])
                                 for tree, chart in zip(trees, chart_preds)])
-
-        if args.draw_pred: ### draw trees here
+        
+        if args.draw_pred and i == 100: ### draw trees here
             filter_delete = lambda x: [it for it in x if it not in args.delete]
             trees_fact = [Tree.factorize(tree, args.delete, args.equal) for tree in preds['trees']]
             leaves = [filter_delete(tree.leaves()) for tree in trees]
             t = convert_to_viz_tree(tree=trees_fact[0], sen=leaves[0])
-
-            draw_tree(t, res_path="./prediction")
+            draw_tree(t, res_path=f"./treefig/prediction_test{i}")
 
     return preds
 
@@ -633,6 +635,7 @@ if __name__ == "__main__":
     p.add_argument('--weight-decay', default=1e-5, type=float, help='learning rate, weight decay')
     p.add_argument('--clip', default=5., type=float, help='gradient clipping')
     p.add_argument('--draw_pred', default=False, type=bool, help='visualize prediction')
+    p.add_argument('--load', default=None, type=str, help='load model')
 
 
     args = p.parse_args()
@@ -679,10 +682,15 @@ if __name__ == "__main__":
     testdata = Dataset(transform, args.test)
     traindata.build(args.batch_size, args.buckets, True)
     devdata.build(args.batch_size, args.buckets)
-    testdata.build(args.batch_size, args.buckets)
+    testdata.build(1, args.buckets)
     print(f"\n{'train:':6} {traindata}\n{'dev:':6} {devdata}\n{'test:':6} {testdata}\n")
-    optimizer = Adam(model.parameters(), args.lr, (args.mu, args.nu), args.eps, args.weight_decay)
-    train(model, traindata, devdata, optimizer)
-    evaluate(model, testdata.loader)
-
-    predict(model, testdata.loader)
+    if args.load is None:
+        optimizer = Adam(model.parameters(), args.lr, (args.mu, args.nu), args.eps, args.weight_decay)
+        train(model, traindata, devdata, optimizer)
+    else:
+        model.load_state_dict(torch.load(args.load))
+        print("load the model successfully")
+    
+    # evaluate(model, testdata.loader)
+    p = predict(model, testdata.loader)
+    print(p)
