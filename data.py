@@ -496,7 +496,7 @@ class Field(RawField):
 
         return sequence
 
-    def build(self, dataset, min_freq=1, embed=None):
+    def build(self, dataset, min_freq=1, embed=None, vocab=None):
         r"""
         Constructs a :class:`~supar.utils.vocab.Vocab` object for this field from the dataset.
         If the vocabulary has already existed, this function will have no effect.
@@ -514,10 +514,13 @@ class Field(RawField):
         if hasattr(self, 'vocab'):
             return
         sequences = getattr(dataset, self.name)
-        counter = Counter(token
-                          for seq in sequences
-                          for token in self.preprocess(seq))
-        self.vocab = Vocab(counter, min_freq, self.specials, self.unk_index)
+        if vocab is None:
+            counter = Counter(token
+                            for seq in sequences
+                            for token in self.preprocess(seq))
+            self.vocab = Vocab(counter, min_freq, self.specials, self.unk_index)
+        else:
+            self.vocab = Vocab(vocab, 1, self.specials, self.unk_index)
 
         if not embed:
             self.embed = None

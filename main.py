@@ -12,7 +12,7 @@ from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 from node import Node, draw_tree
 from tqdm import tqdm
 from util import log_sum_exp_batch as log_sum_exp
-
+import numpy as np
 class Metric(object):
   
     def __lt__(self, other):
@@ -410,7 +410,12 @@ class Model(nn.Module):
                     n_label_mlp=100, mlp_dropout=.33):
 
         super().__init__()
-        self.word_embed = nn.Embedding(num_embeddings=n_words, embedding_dim=n_embed)
+        # self.word_embed = nn.Embedding(num_embeddings=n_words, embedding_dim=n_embed)
+        embs_npa = np.load("../embs_npa.npy")
+        self.word_embed = torch.nn.Embedding.from_pretrained(torch.from_numpy(embs_npa).float())
+        assert (self.word_embed.weight.shape == embs_npa.shape)
+        print(self.word_embed.weight.shape)
+        self.word_embed.require_grad_ = False
         n_input = n_embed
         self.tag_embed = nn.Embedding(num_embeddings=n_tags, embedding_dim=n_feat_embed)
         n_input += n_feat_embed
@@ -433,7 +438,8 @@ class Model(nn.Module):
         ext_words = words
 
         # get outputs from embedding layers
-        word_embed = self.word_embed(ext_words)
+        with torch.no_grad():
+            word_embed = self.word_embed(ext_words)
         tag_embed = self.tag_embed(feats.pop())
         # concatenate the word and tag representations
         embed = torch.cat((word_embed, tag_embed), -1)
@@ -658,10 +664,14 @@ if __name__ == "__main__":
     CHART = ChartField('charts')
     transform = Tree(WORD=(WORD), POS=TAG, TREE=TREE, CHART=CHART)
     traindata = Dataset(transform, args.train)
-    WORD.build(traindata, 2, None)
+    vocab_npa = np.load("../vocab_npa.npy")
+    # embs_npa = np.load("../embs_npa3.npy")
+    vocab = {w:i for i, w in enumerate(vocab_npa)}
+    WORD.build(traindata, 2, None, vocab)
     CHART.build(traindata)
     TAG.build(traindata)
-
+    
+    
     args.encoder = 'lstm'
     args.n_words = WORD.vocab.n_init
     args.n_labels = len(CHART.vocab)
@@ -691,6 +701,6 @@ if __name__ == "__main__":
         model.load_state_dict(torch.load(args.load))
         print("load the model successfully")
     
-    # evaluate(model, testdata.loader)
-    p = predict(model, testdata.loader)
-    print(p)
+    # # evaluate(model, testdata.loader)
+    # predict(model, testdata.loader)
+    # print(p)
